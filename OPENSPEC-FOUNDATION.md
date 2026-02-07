@@ -925,7 +925,346 @@ AnimatedVisibility(
 
 ## 3. Navigation Model
 
-*Task 1.6 deliverable - Navigation graph diagram and route specifications*
+### 3.1 Navigation Graph
+
+```mermaid
+graph TD
+    START[App Launch] --> TOS{TOS Accepted?}
+    TOS -->|No| TOS_DIALOG[TOS Dialog<br/>MODAL]
+    TOS_DIALOG --> TOS_ACCEPT[Accept TOS]
+    TOS_ACCEPT --> MODEL_CHECK{Model Downloaded?}
+    TOS -->|Yes| MODEL_CHECK
+
+    MODEL_CHECK -->|Yes| CHAT[LLM Chat Screen<br/>route_model/llm_chat/modelName]
+    MODEL_CHECK -->|No| MODEL_SEL[Model Selection Screen<br/>model_selection<br/>FIRST LAUNCH ONLY]
+
+    MODEL_SEL --> MODEL_DL[Model Download]
+    MODEL_DL --> CHAT
+
+    CHAT --> SETTINGS[Settings Screen<br/>settings]
+    CHAT --> CONV_LIST[Conversation List<br/>conversation_list]
+    CHAT --> MODEL_SWITCH[Switch Model<br/>ModelPicker]
+
+    SETTINGS --> CUSTOM_INST[Custom Instructions<br/>custom_instructions]
+    SETTINGS --> PRIVACY[Privacy Center<br/>privacy_center]
+    SETTINGS --> STORAGE[Storage Management<br/>storage_management]
+    SETTINGS --> MODEL_PARAMS[Model Parameters<br/>model_parameters]
+    SETTINGS --> CHAT
+
+    CUSTOM_INST --> SETTINGS
+    PRIVACY --> SETTINGS
+    STORAGE --> SETTINGS
+    MODEL_PARAMS --> SETTINGS
+
+    CONV_LIST --> CONV_DETAIL[Conversation Detail<br/>conversation_detail/threadId]
+    CONV_LIST --> CHAT
+
+    CONV_DETAIL --> CONV_LIST
+    CONV_DETAIL --> CHAT_LOAD[Chat Screen<br/>WITH threadId loaded]
+
+    CHAT_LOAD --> CHAT
+
+    MODEL_SWITCH --> CHAT
+
+    DEEP_LINK[Deep Link<br/>ai.ondevice.app://model/taskId/modelName] -.-> CHAT
+
+    PLACEHOLDER[Placeholder Screen<br/>placeholder<br/>ROOT ONLY] -.->|Auto-navigate| MODEL_CHECK
+
+    style START fill:#E3F2FD
+    style TOS_DIALOG fill:#FFEBEE
+    style CHAT fill:#C8E6C9
+    style MODEL_SEL fill:#FFF9C4
+    style SETTINGS fill:#E1BEE7
+    style PLACEHOLDER fill:#ECEFF1
+```
+
+**Navigation Pattern**: Forward navigation slides in from right, back navigation slides out to right (300ms, EaseOutExpo)
+
+### 3.2 Route Definitions
+
+| Route Constant | Route Pattern | Parameters | Screen | Source |
+|----------------|---------------|------------|--------|--------|
+| **ROUTE_PLACEHOLDER** | `placeholder` | None | Empty placeholder (auto-navigates) | `GalleryNavGraph.kt:93` |
+| **ROUTE_MODEL** | `route_model/{taskId}/{modelName}` | taskId: String<br/>modelName: String | Chat/Task screen (dynamic based on taskId) | `GalleryNavGraph.kt:94` |
+| **ROUTE_CONVERSATION_LIST** | `conversation_list` | None | Conversation list screen | `GalleryNavGraph.kt:95` |
+| **ROUTE_CONVERSATION_DETAIL** | `conversation_detail/{threadId}` | threadId: Long | Conversation detail/search screen | `GalleryNavGraph.kt:96` |
+| **ROUTE_SETTINGS** | `settings` | None | Settings screen | `GalleryNavGraph.kt:97` |
+| **ROUTE_CUSTOM_INSTRUCTIONS** | `custom_instructions` | None | Custom instructions editor | `GalleryNavGraph.kt:98` |
+| **ROUTE_PRIVACY_CENTER** | `privacy_center` | None | Privacy controls screen | `GalleryNavGraph.kt:99` |
+| **ROUTE_STORAGE_MANAGEMENT** | `storage_management` | None | Storage management screen | `GalleryNavGraph.kt:100` |
+| **ROUTE_MODEL_PARAMETERS** | `model_parameters` | None | Model parameter tuning screen | `GalleryNavGraph.kt:101` |
+| **ROUTE_MODEL_SELECTION** | `model_selection` | None | First-launch model selection | `GalleryNavGraph.kt:102` |
+
+### 3.3 Navigation Routes by Screen
+
+#### 3.3.1 Chat Screen (LLM Chat)
+
+**Route**: `route_model/llm_chat/{modelName}`
+
+**Parameters**:
+- `taskId`: Always `"llm_chat"` for LLM chat (from `BuiltInTaskId.LLM_CHAT`)
+- `modelName`: Model identifier (e.g., `"gemma-2b-it-gpu-int4"`)
+
+**Saved State**:
+- `loadThreadId`: Long? (optional) - If present, loads existing conversation
+
+**Navigation To**:
+- Settings: `navigate(settings)`
+- Conversation List: `navigate(conversation_list)`
+- Model switch: In-place model selection via `ModelPicker`
+
+**Back Button**: `navigateUp()` to placeholder (exits app)
+
+**Source**: `GalleryNavGraph.kt:352-413`
+
+#### 3.3.2 Model Selection Screen (First Launch)
+
+**Route**: `model_selection`
+
+**Entry Conditions**:
+- First launch (no model downloaded)
+- TOS already accepted
+- No models present in device
+
+**Navigation From**: Auto-navigation after TOS acceptance
+
+**Navigation To**:
+- After model selection: `navigate(route_model/{taskId}/{modelName})` with `popUpTo(placeholder) { inclusive = true }`
+- Clears back stack so user cannot return to model selection
+
+**Back Button**: Not allowed (modal experience, must select a model)
+
+**Source**: `GalleryNavGraph.kt:296-315`
+
+#### 3.3.3 Settings Screen
+
+**Route**: `settings`
+
+**Navigation From**: Chat screen (settings icon in app bar)
+
+**Navigation To**:
+- Custom Instructions: `navigate(custom_instructions)`
+- Privacy Center: `navigate(privacy_center)`
+- Storage Management: `navigate(storage_management)`
+- Model Parameters: `navigate(model_parameters)`
+- Model Selection: `navigate(model_selection)` (to download more models)
+
+**Back Button**: `navigateUp()` to chat screen
+
+**Source**: `GalleryNavGraph.kt:217-242`
+
+#### 3.3.4 Conversation List Screen
+
+**Route**: `conversation_list`
+
+**Navigation From**: Chat screen (history icon in app bar)
+
+**Navigation To**:
+- Conversation Detail: `navigate(conversation_detail/{threadId})`
+- New Chat: `navigateUp()` (back to chat, starts new conversation)
+- Load Existing Conversation: Sets `loadThreadId` in saved state and calls `navigateUp()`
+
+**Special Behavior**: One-step navigation to active chat
+- Instead of showing detail screen, directly returns to chat with conversation loaded
+- Uses `savedStateHandle` to pass `loadThreadId` to chat screen
+
+**Back Button**: `navigateUp()` to chat screen
+
+**Source**: `GalleryNavGraph.kt:317-330`
+
+#### 3.3.5 Conversation Detail Screen
+
+**Route**: `conversation_detail/{threadId}`
+
+**Parameters**:
+- `threadId`: Long - Conversation thread ID to display
+
+**Navigation From**: Conversation list (tap on conversation)
+
+**Navigation To**:
+- Back: `navigateUp()` to conversation list
+- Continue Chat: `navigate(route_model/{taskId}/{modelId})` with `loadThreadId` in saved state
+
+**Back Button**: `navigateUp()` to conversation list
+
+**Source**: `GalleryNavGraph.kt:332-350`
+
+#### 3.3.6 Custom Instructions Screen
+
+**Route**: `custom_instructions`
+
+**Navigation From**: Settings screen
+
+**Navigation To**: Back to settings
+
+**Back Button**: `navigateUp()` to settings screen
+
+**Source**: `GalleryNavGraph.kt:244-253`
+
+#### 3.3.7 Privacy Center Screen
+
+**Route**: `privacy_center`
+
+**Navigation From**: Settings screen
+
+**Navigation To**: Back to settings
+
+**Back Button**: `navigateUp()` to settings screen
+
+**Source**: `GalleryNavGraph.kt:255-265`
+
+#### 3.3.8 Storage Management Screen
+
+**Route**: `storage_management`
+
+**Navigation From**: Settings screen
+
+**Navigation To**: Back to settings (can trigger model deletions)
+
+**Back Button**: `navigateUp()` to settings screen
+
+**Source**: `GalleryNavGraph.kt:267-277`
+
+#### 3.3.9 Model Parameters Screen
+
+**Route**: `model_parameters`
+
+**Navigation From**: Settings screen
+
+**Navigation To**: Back to settings
+
+**Back Button**: `navigateUp()` to settings screen
+
+**Source**: `GalleryNavGraph.kt:279-294`
+
+### 3.4 Deep Linking
+
+**Scheme**: `ai.ondevice.app://`
+
+**Host**: `model`
+
+**Format**: `ai.ondevice.app://model/{taskId}/{modelName}`
+
+**Examples**:
+- `ai.ondevice.app://model/llm_chat/gemma-2b-it-gpu-int4`
+- `ai.ondevice.app://model/image_gen/stable-diffusion-v1-5`
+
+**Behavior**:
+1. App receives deep link intent
+2. Extracts `taskId` and `modelName` from path segments
+3. Verifies model exists via `getModelByName()`
+4. Navigates to `route_model/{taskId}/{modelName}`
+5. If model not downloaded, shows download panel
+6. If model downloaded, loads chat/task screen directly
+
+**Entry Points** (from `AndroidManifest.xml:80-91`):
+- MainActivity handles `android.intent.action.VIEW` with scheme `ai.ondevice.app` and host `model`
+- Browsable category allows launching from web links
+
+**OAuth Redirect**: Separate redirect handled by AppAuth library
+- Redirect URI: `ai.ondevice.app:/oauth2redirect`
+- Not part of main navigation graph
+- Handled by `RedirectUriReceiverActivity` from AppAuth library
+
+**Source**: `GalleryNavGraph.kt:425-442`, `AndroidManifest.xml:80-91`
+
+### 3.5 Back Button Behavior
+
+| Screen | Back Button Action | Special Behavior |
+|--------|-------------------|------------------|
+| **Placeholder** | Exit app (`activity.finish()`) | Root screen, exits cleanly |
+| **Chat Screen** | `navigateUp()` to placeholder → Exit app | No back stack below chat |
+| **Settings** | `navigateUp()` to chat | Standard back |
+| **Model Selection (First Launch)** | Disabled (modal) | Must select a model to proceed |
+| **Conversation List** | `navigateUp()` to chat | Standard back |
+| **Conversation Detail** | `navigateUp()` to conversation list | Standard back |
+| **Custom Instructions** | `navigateUp()` to settings | Standard back |
+| **Privacy Center** | `navigateUp()` to settings | Standard back |
+| **Storage Management** | `navigateUp()` to settings | Standard back |
+| **Model Parameters** | `navigateUp()` to settings | Standard back |
+
+**Edge Swipe Gesture**: Handled identically to back button press (calls `handleNavigateUp()`)
+
+**Source**: `GalleryNavGraph.kt:416-423`, `GalleryNavGraph.kt:473`
+
+### 3.6 Modal vs. Push Navigation
+
+| Navigation Type | Screens | Transition | Back Stack |
+|-----------------|---------|------------|------------|
+| **Modal** | TOS Dialog, Model Download Panel | Fade in/out | Not added to back stack |
+| **Push** | All screen navigations | Slide in/out (horizontal) | Added to back stack |
+| **Replace** | Model Selection → Chat (first launch) | Slide in/out | Clears back stack with `popUpTo` |
+
+**Modal Dialogs** (overlay, not in nav graph):
+- TOS Dialog (first launch)
+- Model Download Status Panel (overlay on task screen)
+- Error Dialog (model initialization errors)
+- Permission Request Dialogs (camera, mic, notifications)
+
+### 3.7 State Preservation Rules
+
+| Screen | Preserved on Back | Preserved on Process Death | Saved State Keys |
+|--------|-------------------|---------------------------|------------------|
+| **Chat Screen** | ✅ Yes (ViewModel) | ✅ Yes (Room + DataStore) | `loadThreadId` (Long?) |
+| **Conversation List** | ✅ Yes (ViewModel) | ✅ Yes (Room) | None |
+| **Settings** | ✅ Yes (DataStore) | ✅ Yes (DataStore) | None |
+| **Model Selection** | ❌ No (one-time screen) | ❌ N/A | None |
+| **Text Input Fields** | ✅ Yes (TextField state) | ❌ No | None |
+
+**Conversation Loading Flow**:
+1. User taps conversation in list
+2. Conversation list sets `loadThreadId` in `savedStateHandle`
+3. Calls `navigateUp()` to return to chat screen
+4. Chat screen observes `loadThreadId` from `savedStateHandle`
+5. If present, loads conversation from Room database
+6. Clears `loadThreadId` after loading (one-time load)
+
+**Source**: `GalleryNavGraph.kt:365-390`
+
+### 3.8 Auto-Navigation (First Launch)
+
+**Flow**:
+```
+App Launch
+  ↓
+TOS Dialog (if not accepted)
+  ↓
+Check: Model Downloaded?
+  ├─ Yes → Navigate to Chat (route_model/llm_chat/{modelName})
+  └─ No → Navigate to Model Selection (model_selection)
+       ↓
+     User selects model
+       ↓
+     Start download
+       ↓
+     Navigate to Chat (clears back stack)
+```
+
+**Implementation** (`GalleryNavGraph.kt:147-170`):
+- Uses `LaunchedEffect` triggered by TOS acceptance and model download status
+- `hasAutoNavigated` flag prevents repeated navigation
+- Checks `modelDownloadStatus` for any downloaded model
+- If model exists: navigate directly to chat
+- If no model: navigate to model selection screen
+
+**Timing**: Auto-navigation occurs ~100-500ms after TOS acceptance (animation delay)
+
+### 3.9 Navigation Animation Specifications
+
+| Animation Property | Value | Source |
+|-------------------|-------|--------|
+| **Enter Duration** | 500ms | `GalleryNavGraph.kt:103` |
+| **Enter Easing** | EaseOutExpo | `GalleryNavGraph.kt:104` |
+| **Enter Delay** | 100ms | `GalleryNavGraph.kt:105` |
+| **Exit Duration** | 500ms | `GalleryNavGraph.kt:107` |
+| **Exit Easing** | EaseOutExpo | `GalleryNavGraph.kt:108` |
+| **Direction** | Horizontal (slide left/right) | `GalleryNavGraph.kt:122-133` |
+
+**Note**: These are DIFFERENT from the 300ms transitions documented in Section 2.4.1. The navigation graph uses 500ms transitions, while the general animation spec states 300ms. The actual implementation uses **500ms** as defined in the navigation code.
+
+**Correction to Section 2.4.1**: Navigation transitions are **500ms**, not 300ms.
+
+---
 
 ---
 
