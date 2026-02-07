@@ -1272,7 +1272,352 @@ Check: Model Downloaded?
 
 ### 4.1 Room Database
 
-*Task 1.7 deliverable - ConversationThread, ConversationMessage, ConversationState entities*
+#### 4.1.1 Database Overview
+
+| Property | Value | Source |
+|----------|-------|--------|
+| **Database Name** | AppDatabase | `AppDatabase.kt:31` |
+| **Current Version** | 8 | `AppDatabase.kt:28` |
+| **Entity Count** | 3 | `AppDatabase.kt:23-26` |
+| **DAO Count** | 1 (ConversationDao) | `AppDatabase.kt:32` |
+| **Export Schema** | false | `AppDatabase.kt:29` |
+
+**Entities**:
+1. ConversationThread - Conversation metadata
+2. ConversationMessage - Individual messages in conversations
+3. ConversationState - Running summaries for compacted conversations
+
+#### 4.1.2 Entity: ConversationThread
+
+**Table Name**: `conversation_threads`
+
+**Purpose**: Stores conversation thread metadata for chat history.
+
+| Field | Type | Constraints | Default | Description | Source |
+|-------|------|-------------|---------|-------------|--------|
+| **id** | Long | PRIMARY KEY, AUTO INCREMENT | Auto | Thread identifier | `ConversationThread.kt:16-17` |
+| **title** | String | NOT NULL | - | Conversation title (auto-generated or user-set) | `ConversationThread.kt:18` |
+| **modelId** | String | NOT NULL | - | Model identifier (e.g., "gemma-2b-it-gpu-int4") | `ConversationThread.kt:19` |
+| **taskId** | String | NOT NULL | - | Task identifier (e.g., "llm_chat") | `ConversationThread.kt:20` |
+| **createdAt** | Long | NOT NULL | System.currentTimeMillis() | Thread creation timestamp (Unix epoch ms) | `ConversationThread.kt:21` |
+| **updatedAt** | Long | NOT NULL | System.currentTimeMillis() | Last update timestamp (Unix epoch ms) | `ConversationThread.kt:22` |
+| **isStarred** | Boolean | NOT NULL | false | Star/pin status for conversation list | `ConversationThread.kt:24` |
+
+**Indices**:
+- `index_threads_updated_at` on `updatedAt` (for sorting conversations by recency)
+
+**SQL DDL**:
+```sql
+CREATE TABLE conversation_threads (
+    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+    title TEXT NOT NULL,
+    modelId TEXT NOT NULL,
+    taskId TEXT NOT NULL,
+    createdAt INTEGER NOT NULL,
+    updatedAt INTEGER NOT NULL,
+    isStarred INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS index_threads_updated_at
+    ON conversation_threads(updatedAt);
+```
+
+**JSON Schema**:
+```json
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["id", "title", "modelId", "taskId", "createdAt", "updatedAt", "isStarred"],
+  "properties": {
+    "id": { "type": "integer", "minimum": 0 },
+    "title": { "type": "string", "minLength": 1, "maxLength": 500 },
+    "modelId": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+    "taskId": { "type": "string", "pattern": "^[a-z_]+$" },
+    "createdAt": { "type": "integer", "minimum": 0 },
+    "updatedAt": { "type": "integer", "minimum": 0 },
+    "isStarred": { "type": "boolean" }
+  }
+}
+```
+
+**Example Data**:
+```json
+{
+  "id": 42,
+  "title": "Quantum computing basics",
+  "modelId": "gemma-2b-it-gpu-int4",
+  "taskId": "llm_chat",
+  "createdAt": 1738425600000,
+  "updatedAt": 1738429200000,
+  "isStarred": true
+}
+```
+
+#### 4.1.3 Entity: ConversationMessage
+
+**Table Name**: `conversation_messages`
+
+**Purpose**: Stores individual messages within conversation threads.
+
+| Field | Type | Constraints | Default | Description | Source |
+|-------|------|-------------|---------|-------------|--------|
+| **id** | Long | PRIMARY KEY, AUTO INCREMENT | Auto | Message identifier | `ConversationMessage.kt:24-25` |
+| **threadId** | Long | FOREIGN KEY → conversation_threads(id) ON DELETE CASCADE, INDEXED | - | Parent thread ID | `ConversationMessage.kt:26` |
+| **content** | String | NOT NULL | - | Message text content (markdown supported) | `ConversationMessage.kt:27` |
+| **isUser** | Boolean | NOT NULL | - | true = user message, false = AI response | `ConversationMessage.kt:28` |
+| **timestamp** | Long | NOT NULL | System.currentTimeMillis() | Message timestamp (Unix epoch ms) | `ConversationMessage.kt:29` |
+| **imageUris** | String? | NULLABLE | null | Comma-separated file paths to internal storage | `ConversationMessage.kt:32` |
+| **audioUri** | String? | NULLABLE | null | File path to internal storage for audio | `ConversationMessage.kt:35` |
+| **audioSampleRate** | Int? | NULLABLE | null | Audio sample rate (Hz) for playback | `ConversationMessage.kt:36` |
+| **messageType** | String | NOT NULL | "TEXT" | Message type enum: TEXT, IMAGE, TEXT_WITH_IMAGE, AUDIO_CLIP | `ConversationMessage.kt:39` |
+
+**Foreign Keys**:
+- `threadId` references `conversation_threads(id)` with `ON DELETE CASCADE`
+  - Deleting a thread automatically deletes all its messages
+
+**Indices**:
+- `index_conversation_messages_threadId` on `threadId` (for efficient message lookups by thread)
+
+**SQL DDL**:
+```sql
+CREATE TABLE conversation_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+    threadId INTEGER NOT NULL,
+    content TEXT NOT NULL,
+    isUser INTEGER NOT NULL,
+    timestamp INTEGER NOT NULL,
+    imageUris TEXT,
+    audioUri TEXT,
+    audioSampleRate INTEGER,
+    messageType TEXT NOT NULL DEFAULT 'TEXT',
+    FOREIGN KEY(threadId) REFERENCES conversation_threads(id) ON DELETE CASCADE
+);
+
+CREATE INDEX index_conversation_messages_threadId
+    ON conversation_messages(threadId);
+```
+
+**JSON Schema**:
+```json
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["id", "threadId", "content", "isUser", "timestamp", "messageType"],
+  "properties": {
+    "id": { "type": "integer", "minimum": 0 },
+    "threadId": { "type": "integer", "minimum": 0 },
+    "content": { "type": "string" },
+    "isUser": { "type": "boolean" },
+    "timestamp": { "type": "integer", "minimum": 0 },
+    "imageUris": { "type": ["string", "null"], "description": "Comma-separated paths" },
+    "audioUri": { "type": ["string", "null"] },
+    "audioSampleRate": { "type": ["integer", "null"], "minimum": 8000, "maximum": 48000 },
+    "messageType": {
+      "type": "string",
+      "enum": ["TEXT", "IMAGE", "TEXT_WITH_IMAGE", "AUDIO_CLIP"]
+    }
+  }
+}
+```
+
+**Example Data**:
+
+*Text Message (User)*:
+```json
+{
+  "id": 100,
+  "threadId": 42,
+  "content": "What is quantum entanglement?",
+  "isUser": true,
+  "timestamp": 1738425610000,
+  "imageUris": null,
+  "audioUri": null,
+  "audioSampleRate": null,
+  "messageType": "TEXT"
+}
+```
+
+*Text Message (AI)*:
+```json
+{
+  "id": 101,
+  "threadId": 42,
+  "content": "Quantum entanglement is a phenomenon where...",
+  "isUser": false,
+  "timestamp": 1738425615000,
+  "imageUris": null,
+  "audioUri": null,
+  "audioSampleRate": null,
+  "messageType": "TEXT"
+}
+```
+
+*Image Message (User)*:
+```json
+{
+  "id": 102,
+  "threadId": 42,
+  "content": "What's in this diagram?",
+  "isUser": true,
+  "timestamp": 1738425620000,
+  "imageUris": "/data/user/0/ai.ondevice.app/files/images/img_1738425620.jpg",
+  "audioUri": null,
+  "audioSampleRate": null,
+  "messageType": "TEXT_WITH_IMAGE"
+}
+```
+
+*Audio Message (User)*:
+```json
+{
+  "id": 103,
+  "threadId": 42,
+  "content": "[Audio transcription placeholder]",
+  "isUser": true,
+  "timestamp": 1738425625000,
+  "imageUris": null,
+  "audioUri": "/data/user/0/ai.ondevice.app/files/audio/audio_1738425625.wav",
+  "audioSampleRate": 16000,
+  "messageType": "AUDIO_CLIP"
+}
+```
+
+#### 4.1.4 Entity: ConversationState
+
+**Table Name**: `conversation_state`
+
+**Purpose**: Stores running summaries for compacted conversations to maintain context beyond token limits.
+
+| Field | Type | Constraints | Default | Description | Source |
+|-------|------|-------------|---------|-------------|--------|
+| **threadId** | Long | PRIMARY KEY | - | Thread ID (1:1 with ConversationThread) | `ConversationState.kt:28` |
+| **runningSummary** | String | NOT NULL | - | Cumulative summary of conversation history | `ConversationState.kt:29` |
+| **turnsSummarized** | Int | NOT NULL | - | Number of message pairs (user+AI) summarized | `ConversationState.kt:30` |
+| **lastCompactionTime** | Long | NOT NULL | - | Timestamp of last compaction (Unix epoch ms) | `ConversationState.kt:31` |
+
+**Relationship**: One-to-one with ConversationThread (optional - only created after first compaction)
+
+**SQL DDL**:
+```sql
+CREATE TABLE IF NOT EXISTS conversation_state (
+    threadId INTEGER PRIMARY KEY NOT NULL,
+    runningSummary TEXT NOT NULL,
+    turnsSummarized INTEGER NOT NULL,
+    lastCompactionTime INTEGER NOT NULL
+);
+```
+
+**JSON Schema**:
+```json
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["threadId", "runningSummary", "turnsSummarized", "lastCompactionTime"],
+  "properties": {
+    "threadId": { "type": "integer", "minimum": 0 },
+    "runningSummary": { "type": "string", "minLength": 1 },
+    "turnsSummarized": { "type": "integer", "minimum": 0 },
+    "lastCompactionTime": { "type": "integer", "minimum": 0 }
+  }
+}
+```
+
+**Example Data**:
+```json
+{
+  "threadId": 42,
+  "runningSummary": "User asked about quantum entanglement. I explained the concept and provided examples of Bell states. User then inquired about practical applications...",
+  "turnsSummarized": 12,
+  "lastCompactionTime": 1738429000000
+}
+```
+
+#### 4.1.5 Migration Strategy (v1 → v8)
+
+| Version | Changes | SQL Operations | Source |
+|---------|---------|----------------|--------|
+| **v1** | Initial schema | CREATE tables | Baseline |
+| **v1→v2** | Add image support | ALTER TABLE add imageUris, messageType | `DatabaseMigrations.kt:31-43` |
+| **v2→v3** | Add audio support + index | ALTER TABLE add audioUri, audioSampleRate<br/>CREATE INDEX on updatedAt | `DatabaseMigrations.kt:49-66` |
+| **v3→v4** | Add persona + token fields (experimental) | ALTER TABLE add personaVariant, estimatedTokens, lastTokenUpdate | `DatabaseMigrations.kt:72-89` |
+| **v4→v5** | No-op (compression fields removed before release) | No changes | `DatabaseMigrations.kt:95-99` |
+| **v5→v6** | Remove compression fields from messages | RECREATE conversation_messages table (drop column workaround) | `DatabaseMigrations.kt:106-148` |
+| **v6→v7** | Remove token/persona fields from threads | RECREATE conversation_threads table, add isStarred | `DatabaseMigrations.kt:154-193` |
+| **v7→v8** | Add conversation_state for compaction | CREATE TABLE conversation_state | `DatabaseMigrations.kt:199-213` |
+
+**Migration Execution**: All migrations run in sequence via `ALL_MIGRATIONS` array
+
+**Data Preservation**: All migrations preserve existing user data (no data loss)
+
+**SQLite Limitation**: DROP COLUMN not supported before SQLite 3.35.0, so table recreation used in v5→v6 and v6→v7 migrations
+
+#### 4.1.6 Database Relationships
+
+```
+conversation_threads (1) ----< (∞) conversation_messages
+                      (1) ---- (0..1) conversation_state
+
+Foreign Key: conversation_messages.threadId → conversation_threads.id (CASCADE DELETE)
+Relationship: conversation_state.threadId → conversation_threads.id (implicit 1:1)
+```
+
+**Cascade Delete Behavior**:
+- Delete thread → Automatically deletes all messages
+- Delete thread → Does NOT automatically delete conversation_state (orphaned, but harmless)
+
+#### 4.1.7 Query Patterns
+
+**Common Queries**:
+
+*Get all threads sorted by recency*:
+```sql
+SELECT * FROM conversation_threads
+ORDER BY updatedAt DESC;
+```
+
+*Get all messages for a thread*:
+```sql
+SELECT * FROM conversation_messages
+WHERE threadId = ?
+ORDER BY timestamp ASC;
+```
+
+*Get conversation with state*:
+```sql
+SELECT t.*, s.runningSummary, s.turnsSummarized
+FROM conversation_threads t
+LEFT JOIN conversation_state s ON t.id = s.threadId
+WHERE t.id = ?;
+```
+
+*Search conversations by title*:
+```sql
+SELECT * FROM conversation_threads
+WHERE title LIKE ?
+ORDER BY updatedAt DESC;
+```
+
+*Get starred conversations*:
+```sql
+SELECT * FROM conversation_threads
+WHERE isStarred = 1
+ORDER BY updatedAt DESC;
+```
+
+#### 4.1.8 Data Integrity Rules
+
+**Constraints**:
+- Thread ID must exist before creating messages (foreign key enforced)
+- Message timestamps must be sequential within a thread (application-level validation)
+- Audio sample rates must be valid (8000-48000 Hz, application-level validation)
+- Image/audio URIs must point to internal storage (application-level validation)
+
+**Validation**:
+- Title: Max 500 characters (application-level)
+- Content: No max length (SQLite TEXT type supports up to 1 billion characters)
+- Message type: Must be one of TEXT, IMAGE, TEXT_WITH_IMAGE, AUDIO_CLIP
+
+---
 
 ### 4.2 Core Models
 
