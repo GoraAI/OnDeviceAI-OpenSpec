@@ -8,6 +8,56 @@
 
 ---
 
+## 🎨 Visual Assets
+
+<p align="center">
+  <img src="assets/logos/ondevice_logo_full.png" alt="OnDevice AI Logo" width="400"/>
+</p>
+
+**Logos**: [`assets/logos/`](assets/logos/)
+- `ondevice_logo_full.png` - Full brand logo (557 KB)
+- `neural_circuit_logo.png` - Neural circuit icon (43 KB)
+- `app_icon.png` - App launcher icon (14 KB)
+- `app_icon_foreground.png` - Icon foreground layer (63 KB)
+
+**Screenshots**: [`assets/screenshots/`](assets/screenshots/)
+- Chat screen (active conversation)
+- Conversation list (history)
+- Settings screen
+- Empty chat (welcome state)
+- Model download screens
+
+<details>
+<summary><b>📸 View Screenshots</b></summary>
+
+### Chat Screen
+![Chat Screen](assets/screenshots/01-chat-screen.png)
+*Active conversation with AI model showing message bubbles and input area*
+
+### Conversation List
+![Conversation List](assets/screenshots/02-conversation-list.png)
+*History of past conversations with search and starred items*
+
+### Settings Screen
+![Settings](assets/screenshots/03-settings-screen.png)
+*App settings with theme, text size, and privacy controls*
+
+### Empty Chat (Welcome State)
+![Empty Chat](assets/screenshots/04-empty-chat.png)
+*Initial chat screen before any messages*
+
+### Model Download
+![Model Download](assets/screenshots/05-model-download.png)
+*Model download in progress with percentage indicator*
+
+### Download Progress
+![Download Progress](assets/screenshots/06-download-progress.png)
+*Detailed download progress with file size and speed*
+
+</details>
+
+---
+
 ## 📋 Quick Navigation
 
 | Phase | File | Pages | Description |
